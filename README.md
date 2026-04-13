@@ -1,4 +1,4 @@
-# qwen3-vl-2b-ONNX: Image-to-Text Inference Model
+# Qwen3/3.5-ONNX: Image-to-Text Inference Model
 
 ## Overview
 This repository provides the ONNX-converted version of the **qwen3-vl-2b** multimodal model, optimized for efficient image-to-text generation. The model supports inference on single images with a fixed input resolution of 224×224 and outputs descriptive text based on visual content.
@@ -10,7 +10,7 @@ This repository provides the ONNX-converted version of the **qwen3-vl-2b** multi
 - **Conversion Source**: Original qwen3-vl-2b (PyTorch) → ONNX format
 
 ## Future Features
-- **Qwen3.5-VL ONNX**: revise bug for linear attention of qwen35.
+- **Qwen3.5-VL ONNX**: Qwen3.5 can be converted to ONNX, but its inference speed is slower than PyTorch. This is mainly because the torch_chunk_gated_delta_rule function in Qwen3.5 uses a large number of dynamic slicing operations and loops, resulting in a very large static computation graph in ONNX.
 
 ## Inference Example
 ### Input
