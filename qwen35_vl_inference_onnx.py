@@ -19,7 +19,7 @@ class ArgsConfig:
     export_path: str = 'export/qwen35_vl_2b'
     """Directory to save onnx model checkpoints."""
 
-    inference_mode: Literal["pytorch", "onnx", "compare"] = "onnx"
+    inference_mode: Literal["pytorch", "onnx", "compare"] = "compare"
     """Which inference mode to use"""
 
     dtype: str = 'fp16'
@@ -317,7 +317,7 @@ def main(config: ArgsConfig):
         tokens_len = 0
         start_time = time.perf_counter()
         for _ in range(10):
-            generated_tokens = torch_model.generate(**messages, max_new_tokens=1280, use_cache=False)[:, messages['input_ids'].shape[1]:]
+            generated_tokens = torch_model.generate(**messages, max_new_tokens=500, use_cache=False)[:, messages['input_ids'].shape[1]:]
             tokens_len += generated_tokens.shape[0] * generated_tokens.shape[1]
         elapsed_time = time.perf_counter() - start_time
         print(f"Qwen3-vl Generated tokens nums:{tokens_len}, speed: {(tokens_len/ elapsed_time): 2f} tokens/sec")
@@ -331,7 +331,7 @@ def main(config: ArgsConfig):
         for _ in range(10):
             generated_tokens = onnx_model.generate(
                 **messages,
-                max_new_tokens=1280,
+                max_new_tokens=500,
                 method="sampling",  # or "sampling"
                 temperature=0.8,
                 top_k=20
@@ -343,7 +343,7 @@ def main(config: ArgsConfig):
         messages = chat_inputs(processor, 'pytorch')
         messages = messages.to("cuda")
         torch_model = Qwen3_5ForConditionalGeneration.from_pretrained(config.qwen_path, device_map="cuda", dtype=torch.float32)
-        generated_tokens = torch_model.generate(**messages, max_new_tokens=1280)[:, messages['input_ids'].shape[1]:]
+        generated_tokens = torch_model.generate(**messages, max_new_tokens=500)[:, messages['input_ids'].shape[1]:]
         torch_output_text = processor.batch_decode(
             generated_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
@@ -355,7 +355,7 @@ def main(config: ArgsConfig):
         onnx_model = QwenVLDecoder(config.onnx_path)
         generated_tokens = onnx_model.generate(
                 **messages,
-                max_new_tokens=1280,
+                max_new_tokens=500,
                 method="greedy",  # "greedy" or "sampling"
                 temperature=0.8,
                 top_k=20

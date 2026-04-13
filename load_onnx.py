@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from utils import get_model_input, get_qwen35_onnx_input
 from config.qwen35_config import ArgsConfig
 
+sess_options = ort.SessionOptions()
+sess_options.log_severity_level = 1
 
 def compare_predictions(pred_tensorrt, pred_torch) -> None:
     """
@@ -122,11 +124,13 @@ def load_onnx_part(inputs, onnx_part):
     print("ONNX模型输入名称:", input_names)
     print("ONNX模型输出名称:", output_names)
 
+    start_time = time.perf_counter()
     onnx_outputs = session.run(
         input_feed=onnx_inputs,
         output_names=inputs["output_names"],
     )
 
+    print(f"spend time: {time.perf_counter() - start_time}")
     return onnx_outputs[0]
 
 
@@ -485,7 +489,7 @@ def load_model_onnx(config):
 
     print("ONNX model load done!")
 
-    part_name = 'vlm'
+    part_name = 'llm'
     netron.start(os.path.join(onnx_path, f'{part_name}/{part_name}.onnx'))
 
     load_onnx_part(
