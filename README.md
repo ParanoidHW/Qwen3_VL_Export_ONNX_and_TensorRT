@@ -59,7 +59,7 @@ Export with static shapes. `--max-sequence-length` controls the padded prefill/c
 python qwen35_vl_export_onnx.py --max-sequence-length 512 --decode-sequence-length 1 --verify
 ```
 Defaults are also available in `config/qwen35_config.py` if you want to persist local settings, but the CLI arguments take precedence for each export run.
-The default dtype is fp16 and requires CUDA; use `--dtype fp32` for CPU export.
+The default dtype is fp16 and requires CUDA or Ascend NPU; use `--device npu` on Ascend, or `--dtype fp32 --device cpu` for CPU export.
 By default the exporter writes the complete `vit -> vlm -> llm_prefill/llm_decode -> gen` chain plus `embed` for decode token embedding. Use `--export-parts` only when you intentionally want a partial export.
 The verifier can also be run separately after export:
 ```bash

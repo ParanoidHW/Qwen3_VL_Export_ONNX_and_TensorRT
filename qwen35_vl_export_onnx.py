@@ -14,6 +14,7 @@ def parse_args():
     parser.add_argument("--qwen-path", default=None, help="Path to the Qwen3.5-VL model directory.")
     parser.add_argument("--export-path", default=None, help="Directory to save exported ONNX submodules.")
     parser.add_argument("--dtype", choices=("fp16", "fp32"), default=None, help="ONNX export dtype.")
+    parser.add_argument("--device", choices=("auto", "cuda", "npu", "cpu"), default=None, help="Device used for tracing/export.")
     parser.add_argument("--max-sequence-length", type=int, default=None, help="Static prefill/cache sequence length.")
     parser.add_argument("--decode-sequence-length", type=int, default=None, help="Static decode step length.")
     parser.add_argument(
@@ -42,6 +43,8 @@ def apply_cli_overrides(config, args):
         config.export_path = args.export_path
     if args.dtype is not None:
         config.dtype = args.dtype
+    if args.device is not None:
+        config.device = args.device
     if args.max_sequence_length is not None:
         config.max_sequence_length = args.max_sequence_length
     if args.decode_sequence_length is not None:
@@ -127,15 +130,53 @@ def export_part_onnx(torch, qwen_model, opt_model, onnx_inputs, onnx_path, confi
 
 
 def _resolve_runtime(torch, config):
-    config.device = "cuda" if torch.cuda.is_available() else "cpu"
+    requested_device = getattr(config, "device", None) or "auto"
+    if requested_device == "auto":
+        config.device = _auto_export_device(torch)
+    else:
+        config.device = requested_device
+    _validate_export_device(torch, config.device)
+
     requested_dtype = config.dtype
     config.dtype = torch.float16 if config.dtype == "fp16" else torch.float32
     if config.device == "cpu" and config.dtype == torch.float16:
         raise RuntimeError(
-            "fp16 Qwen3.5 ONNX export requires CUDA. Use --dtype fp32 for CPU export, "
-            "or run on a CUDA machine."
+            "fp16 Qwen3.5 ONNX export requires CUDA or Ascend NPU. "
+            "Use --dtype fp32 for CPU export, or pass --device cuda/npu on an accelerator machine."
         )
     print(f"Export device: {config.device}, dtype: {requested_dtype}")
+
+
+def _auto_export_device(torch):
+    if torch.cuda.is_available():
+        return "cuda"
+    if _torch_npu_is_available(torch):
+        return "npu"
+    return "cpu"
+
+
+def _torch_npu_is_available(torch):
+    npu = getattr(torch, "npu", None)
+    if npu is not None and hasattr(npu, "is_available"):
+        return bool(npu.is_available())
+    try:
+        import torch_npu  # noqa: F401
+    except ImportError:
+        return False
+    npu = getattr(torch, "npu", None)
+    return bool(npu is not None and hasattr(npu, "is_available") and npu.is_available())
+
+
+def _validate_export_device(torch, device):
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("--device cuda was requested, but torch.cuda.is_available() is false.")
+    if device == "npu" and not _torch_npu_is_available(torch):
+        raise RuntimeError(
+            "--device npu was requested, but torch_npu/torch.npu is not available. "
+            "Install the Ascend PyTorch adapter and run in an NPU environment."
+        )
+    if device != "cpu" and device not in ("cuda", "npu"):
+        raise ValueError(f"Unsupported export device: {device!r}.")
 
 
 def _shape_of(tensor):

@@ -17,8 +17,8 @@ class ArgsConfig:
     imgs_paths: tuple = ("demo_data/input1.png", )
     """Path of images for ONNX model inference"""
 
-    device: str = None
-    """Device used for ONNX model inference"""
+    device: str = "auto"
+    """Device used for ONNX export: auto, cuda, npu, or cpu."""
 
     dtype = 'fp16'
     """Data type of ONNX model: 'fp16' or 'fp32' """
