@@ -1,5 +1,5 @@
 import torch
-from transformers.models.qwen3_5 import Qwen3_5VisionModel
+from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5VisionModel
 import torch.nn.functional as F
 
 
@@ -14,8 +14,10 @@ class Qwen35VLVisualModelOpt(Qwen3_5VisionModel):
         weight_list = [[] for _ in range(4)]
 
         for t, h, w in zip(grid_ts, grid_hs, grid_ws):
-            h_idxs = torch.linspace(0, self.num_grid_per_side - 1, h)
-            w_idxs = torch.linspace(0, self.num_grid_per_side - 1, w)
+            h_steps = int(h.item())
+            w_steps = int(w.item())
+            h_idxs = torch.linspace(0, self.num_grid_per_side - 1, h_steps, device=self.pos_embed.weight.device)
+            w_idxs = torch.linspace(0, self.num_grid_per_side - 1, w_steps, device=self.pos_embed.weight.device)
 
             h_idxs_floor = h_idxs.int()
             w_idxs_floor = w_idxs.int()
@@ -52,11 +54,7 @@ class Qwen35VLVisualModelOpt(Qwen3_5VisionModel):
         )
         pos_embeds = self.pos_embed(idx_tensor) * weight_tensor[:, :, None]
         patch_pos_embeds = pos_embeds[0] + pos_embeds[1] + pos_embeds[2] + pos_embeds[3]
-        # Just For One picture
-        pos_embeds = patch_pos_embeds.view(1, 8, 2, 8, 2, 1024)
-        pos_embeds = pos_embeds.permute(0, 1, 3, 2, 4, 5)
-        pos_embeds = pos_embeds.flatten(0, 4)
-        return pos_embeds
+        return _merge_spatial_units(patch_pos_embeds, grid_thw, self.spatial_merge_size)
 
 
     def rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
@@ -130,3 +128,27 @@ class Qwen35VLVisualModelOpt(Qwen3_5VisionModel):
         merged_hidden_states = self.merger(hidden_states)
 
         return merged_hidden_states
+
+
+def _merge_spatial_units(patch_pos_embeds, grid_thw, merge_size):
+    merged = []
+    offset = 0
+    hidden_size = patch_pos_embeds.shape[-1]
+    for grid_t, grid_h, grid_w in grid_thw:
+        token_count = int((grid_t * grid_h * grid_w).item())
+        image_pos_embeds = patch_pos_embeds[offset : offset + token_count]
+        offset += token_count
+
+        merged_h = int((grid_h // merge_size).item())
+        merged_w = int((grid_w // merge_size).item())
+        image_pos_embeds = image_pos_embeds.view(
+            int(grid_t.item()),
+            merged_h,
+            merge_size,
+            merged_w,
+            merge_size,
+            hidden_size,
+        )
+        image_pos_embeds = image_pos_embeds.permute(0, 1, 3, 2, 4, 5)
+        merged.append(image_pos_embeds.flatten(0, 4))
+    return torch.cat(merged, dim=0)

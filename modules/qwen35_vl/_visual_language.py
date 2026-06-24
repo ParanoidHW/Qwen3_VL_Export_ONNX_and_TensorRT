@@ -8,6 +8,10 @@ class Qwen35VLModelOpt(Qwen3_5Model):
     def __init__(self, qwen_config, onnx_config):
         self.batch_size = onnx_config.batch_size
         self.imgs_nums = len(onnx_config.imgs_paths)
+        if hasattr(onnx_config, "image_embed_lengths"):
+            self.image_embed_lengths = tuple(onnx_config.image_embed_lengths)
+        else:
+            self.image_embed_lengths = (onnx_config.image_embed_length,)
         super().__init__(qwen_config)
 
     def get_rope_index(
@@ -30,40 +34,45 @@ class Qwen35VLModelOpt(Qwen3_5Model):
             device=input_ids.device,
         )
 
-        for batch_idx in range(self.batch_size):
-            current_input_ids = input_ids[batch_idx]
+        grid_iter = iter(image_grid_thw)
+        for batch_idx, current_input_ids in enumerate(input_ids):
             input_token_type = mm_token_type_ids[batch_idx]
-            grid_thw = image_grid_thw[batch_idx]
 
             current_input_ids = current_input_ids[attention_mask[batch_idx].bool()]
             input_token_type = input_token_type[attention_mask[batch_idx].bool()]
 
-            visual_mask = (input_token_type == 1).float()
-            first_one = visual_mask.argmax(dim=0).item()
-            last_one = int((visual_mask * torch.arange(visual_mask.size(0), device=visual_mask.device)).max().item())
+            input_type_group = []
+            for key, group in itertools.groupby(enumerate(input_token_type.tolist()), lambda x: x[1]):
+                group = list(group)
+                start_index = group[0][0]
+                end_index = group[-1][0] + 1
+                input_type_group.append((key, start_index, end_index))
 
+            current_pos = 0
             llm_pos_ids_list = []
-            # llm part
-            llm_pos_ids_list.append(
-                torch.arange(first_one, device=input_ids.device).view(1, -1).expand(3, -1)
-            )
-
-            # vision part
-            vision_position_ids = self.get_vision_position_ids(
-                first_one, grid_thw, 1, spatial_merge_size, device=input_ids.device
-            )
-            llm_pos_ids_list.append(vision_position_ids)
-            first_one += max(grid_thw[1], grid_thw[2]) // spatial_merge_size
-
-            # llm part
-            llm_pos_ids_list.append(
-                torch.arange(input_token_type.size(0) - last_one - 1, device=input_ids.device).view(1, -1).expand(3, -1) + first_one
-            )
+            for modality_type, start_idx, end_idx in input_type_group:
+                if modality_type == 0:
+                    text_len = end_idx - start_idx
+                    llm_pos_ids_list.append(
+                        torch.arange(text_len, device=input_ids.device).view(1, -1).expand(3, -1) + current_pos
+                    )
+                    current_pos += text_len
+                elif modality_type == 1:
+                    grid_thw = next(grid_iter)
+                    vision_position_ids = self.get_vision_position_ids(
+                        current_pos, grid_thw, 1, spatial_merge_size, device=input_ids.device
+                    )
+                    llm_pos_ids_list.append(vision_position_ids)
+                    grid_h = int(grid_thw[1].item())
+                    grid_w = int(grid_thw[2].item())
+                    current_pos += max(grid_h, grid_w) // spatial_merge_size
+                else:
+                    raise ValueError(f"Unsupported Qwen3.5 multimodal token type for ONNX export: {modality_type}")
 
             llm_positions = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
 
             position_ids[:, batch_idx, attention_mask[batch_idx].bool()] = llm_positions.to(position_ids.device)
-            mrope_position_deltas.append(llm_positions.max() + 1 - len(current_input_ids))
+            mrope_position_deltas.append(int(llm_positions.max().item()) + 1 - len(current_input_ids))
         mrope_position_deltas = torch.tensor(mrope_position_deltas, device=input_ids.device).unsqueeze(1)
         return position_ids, mrope_position_deltas
 
@@ -75,9 +84,7 @@ class Qwen35VLModelOpt(Qwen3_5Model):
             image_embeds (`torch.Tensor` of shape `(batch_size, num_channels, image_size, image_size)`):
                 The tensors corresponding to the input images.
         """
-        # image_embeds, deepstack_image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
-        # split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
-        image_embeds = torch.split(image_embeds, 64)
+        image_embeds = torch.split(image_embeds, self.image_embed_lengths)
         return image_embeds
 
 
@@ -114,4 +121,19 @@ class Qwen35VLModelOpt(Qwen3_5Model):
         text_positions = text_positions[None, ...]
         position_ids = torch.cat([text_positions, vision_positions], dim=0)
 
-        return position_ids, inputs_embeds
+        batch_size, seq_len = attention_mask.shape
+        causal_mask = torch.triu(
+            torch.ones((batch_size, 1, seq_len, seq_len), dtype=torch.bool, device=attention_mask.device),
+            diagonal=1,
+        )
+        padding_key_mask = (attention_mask == 0)[:, None, None, :]
+        llm_attention_mask = torch.zeros(
+            (batch_size, 1, seq_len, seq_len), dtype=inputs_embeds.dtype, device=inputs_embeds.device
+        )
+        llm_attention_mask = llm_attention_mask.masked_fill(
+            causal_mask | padding_key_mask,
+            torch.finfo(inputs_embeds.dtype).min,
+        )
+        linear_attention_mask = attention_mask.to(dtype=inputs_embeds.dtype)
+
+        return position_ids, inputs_embeds, llm_attention_mask, linear_attention_mask

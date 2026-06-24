@@ -22,3 +22,15 @@ class ArgsConfig:
 
     dtype = 'fp16'
     """Data type of ONNX model: 'fp16' or 'fp32' """
+
+    max_sequence_length: int = 512
+    """Static token cache length for prefill/decode ONNX export."""
+
+    decode_sequence_length: int = 1
+    """Static decode step length. Keep this as 1 for token-by-token decoding."""
+
+    export_parts: tuple = ("vit", "vlm", "llm_prefill", "llm_decode", "gen", "embed")
+    """ONNX submodules to export for the Qwen3.5-VL inference chain."""
+
+    verbose_export: bool = False
+    """Print verbose torch.onnx export graph logs."""
