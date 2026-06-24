@@ -60,7 +60,7 @@ python qwen35_vl_export_onnx.py --max-sequence-length 512 --decode-sequence-leng
 ```
 Defaults are also available in `config/qwen35_config.py` if you want to persist local settings, but the CLI arguments take precedence for each export run.
 The default dtype is fp16 and requires CUDA or Ascend NPU; use `--device npu` on Ascend, or `--dtype fp32 --device cpu` for CPU export.
-By default the exporter writes the complete `vit -> vlm -> llm_prefill/llm_decode -> gen` chain plus `embed` for decode token embedding. Use `--export-parts` only when you intentionally want a partial export.
+By default the exporter writes the complete `vit -> embed -> vlm -> llm_prefill/llm_decode -> gen` chain plus weightless `embed_select` for decode token selection. Use `--export-parts` only when you intentionally want a partial export.
 The verifier can also be run separately after export:
 ```bash
 python verify_qwen35_onnx_exports.py
@@ -70,8 +70,8 @@ Large submodules are exported with ONNX external data files next to each `.onnx`
 The manifest records static shapes, runtime inputs, layout inputs, and prefill/decode cache handoff names.
 For `vlm`, the exported prompt layout is static: sequence length, image count/grid, and image placeholder pattern are fixed by the export inputs.
 Layout inputs such as `mm_token_type_ids` and `image_grid_thw` can still be ONNX graph inputs, so provide them with the same static shapes recorded in the manifest.
-The `vlm` graph outputs `position_ids`, `inputs_embeds`, `attention_mask`, and `linear_attention_mask`, which can be fed to `llm_prefill` inputs with the same names.
-For decode, feed generated token ids to `embed`, then feed `embed.inputs_embeds` to `llm_decode.inputs_embeds`.
+The shared `embed` graph produces token embeddings for both prompt and decode. Feed prompt `embed.inputs_embeds` into `vlm.inputs_embeds`; `vlm` then outputs fused `inputs_embeds`, `position_ids`, `attention_mask`, and `linear_attention_mask` for `llm_prefill`.
+For decode, feed generated token ids to the same max-sequence `embed`, then use `embed_select` with `cache_position` to produce `llm_decode.inputs_embeds`.
 For each decode call, update `llm_decode.position_ids` and `cache_position` values for the current token window while keeping their exported static shapes.
 The verifier checks static graph dimensions and that every `present_*` cache output can be fed to the matching `past_*` decode input.
 

@@ -91,13 +91,15 @@ class Qwen35VLModelOpt(Qwen3_5Model):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         image_embeds: Optional[torch.Tensor] = None,
         mm_token_type_ids: Optional[torch.Tensor] = None,
         image_grid_thw: Optional[torch.Tensor] = None,
         **kwargs,
     ):
-        inputs_embeds = self.get_input_embeddings()(input_ids) # torch.Size([1, 144, 2048])
+        if inputs_embeds is None:
+            raise ValueError("Qwen3.5 VLM ONNX bridge expects inputs_embeds from the shared embed submodule.")
 
         # process image use vit model
         image_embeds = self.get_image_features(image_embeds)

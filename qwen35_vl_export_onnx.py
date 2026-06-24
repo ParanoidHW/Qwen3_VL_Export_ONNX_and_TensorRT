@@ -4,9 +4,9 @@ import os
 import shutil
 
 
-EXPORT_PARTS = ("vit", "vlm", "llm", "llm_prefill", "llm_decode", "gen", "embed")
-DEFAULT_EXPORT_PARTS = ("vit", "vlm", "llm_prefill", "llm_decode", "gen", "embed")
-REQUIRED_CHAIN_PARTS = {"vit", "vlm", "llm_prefill", "llm_decode", "gen", "embed"}
+EXPORT_PARTS = ("vit", "vlm", "llm", "llm_prefill", "llm_decode", "gen", "embed", "embed_select")
+DEFAULT_EXPORT_PARTS = ("vit", "vlm", "llm_prefill", "llm_decode", "gen", "embed", "embed_select")
+REQUIRED_CHAIN_PARTS = {"vit", "vlm", "llm_prefill", "llm_decode", "gen", "embed", "embed_select"}
 
 
 def parse_args():
@@ -273,9 +273,10 @@ def write_export_manifest(onnx_path, onnx_input, export_parts, config, input_sha
         },
         "runtime_notes": {
             "vlm_attention_masks": "Static int mask with 1 for valid prompt tokens and 0 for padding.",
+            "vlm_inputs": "Feed shared embed.inputs_embeds plus input_ids/layout inputs to VLM; VLM does not own token embedding weights.",
             "vlm_outputs": "Feed VLM position_ids, inputs_embeds, attention_mask, and linear_attention_mask to llm_prefill inputs with matching names.",
             "vlm_prompt_layout": "The VLM graph is traced for the exported static prompt layout: sequence length, image count, image grid, and image placeholder pattern are fixed by the export inputs. Layout inputs may still be graph inputs and must be provided with the same static shapes.",
-            "decode_embedding": "Feed generated token ids to embed, then feed embed.inputs_embeds to llm_decode.inputs_embeds.",
+            "decode_embedding": "Use the shared max-sequence embed graph for token ids, then feed embed_select inputs_embeds/cache_position to produce llm_decode.inputs_embeds.",
             "external_data": "Large ONNX models are exported with external data files next to each part .onnx file.",
             "llm_prefill_attention_mask": "Static 4D additive mask. Fill causal and padding-key positions with dtype minimum.",
             "llm_prefill_linear_attention_mask": "Static 2D mask with 1 for valid prefill tokens and 0 for padding.",
@@ -353,6 +354,7 @@ def run_export(config):
         Qwen35VLModelOpt,
         Qwen35VLForConditionalGenerationOpt,
         Qwen35VLTokenEmbeddingOpt,
+        Qwen35VLEmbedSelectOpt,
     )
     from utils import get_model_input, get_qwen35_onnx_input
 
@@ -411,6 +413,11 @@ def run_export(config):
             "state_dict_getter": lambda model: {
                 f"embed_tokens.{key}": value for key, value in model.embed_tokens.state_dict().items()
             },
+        },
+        "embed_select": {
+            "original": None,
+            "optimized": Qwen35VLEmbedSelectOpt(),
+            "state_dict_getter": lambda model: {},
         },
     }
 

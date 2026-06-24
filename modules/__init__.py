@@ -15,6 +15,7 @@ _EXPORTS = {
         "Qwen35VLForConditionalGenerationOpt",
     ),
     "Qwen35VLTokenEmbeddingOpt": ("modules.qwen35_vl._generation", "Qwen35VLTokenEmbeddingOpt"),
+    "Qwen35VLEmbedSelectOpt": ("modules.qwen35_vl._generation", "Qwen35VLEmbedSelectOpt"),
 }
 
 __all__ = tuple(_EXPORTS)

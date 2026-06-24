@@ -165,7 +165,10 @@ def get_qwen35_onnx_input(config, torch_input, llm_hidden_size, vit_hidden_size,
         (batch_size, decode_seq_len, gen_hidden_size), dtype=config.dtype
     ).to(config.device)
     embed_input_ids = torch.zeros(
-        (batch_size, decode_seq_len), dtype=torch.int64, device=config.device
+        (batch_size, max_seq_len), dtype=torch.int64, device=config.device
+    )
+    embed_select_inputs_embeds = torch.zeros(
+        (batch_size, max_seq_len, llm_hidden_size), dtype=config.dtype, device=config.device
     )
 
     prefill_position_ids = torch.ones(
@@ -241,8 +244,8 @@ def get_qwen35_onnx_input(config, torch_input, llm_hidden_size, vit_hidden_size,
             "dynamic_axes": {}
         },
         "vlm": {
-            "inputs": (input_ids, attention_masks, image_embeds, mm_token_type_ids, image_grid_thw),
-            "input_names": ["input_ids", "attention_masks", "image_embeds", "mm_token_type_ids", "image_grid_thw"],
+            "inputs": (input_ids, inputs_embeds, attention_masks, image_embeds, mm_token_type_ids, image_grid_thw),
+            "input_names": ["input_ids", "inputs_embeds", "attention_masks", "image_embeds", "mm_token_type_ids", "image_grid_thw"],
             "output_names": ["position_ids", "inputs_embeds", "attention_mask", "linear_attention_mask"],
             "dynamic_axes": {},
         },
@@ -255,6 +258,12 @@ def get_qwen35_onnx_input(config, torch_input, llm_hidden_size, vit_hidden_size,
         "embed": {
             "inputs": (embed_input_ids, ),
             "input_names": ["input_ids"],
+            "output_names": ["inputs_embeds"],
+            "dynamic_axes": {},
+        },
+        "embed_select": {
+            "inputs": (embed_select_inputs_embeds, decode_cache_position),
+            "input_names": ["inputs_embeds", "cache_position"],
             "output_names": ["inputs_embeds"],
             "dynamic_axes": {},
         },

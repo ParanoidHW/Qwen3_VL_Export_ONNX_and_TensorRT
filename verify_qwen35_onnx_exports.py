@@ -156,6 +156,19 @@ def _verify_chain_shapes(part_infos, manifest):
                 f"{vit_output_map['image_embeds'].shape} != {vlm_input_map['image_embeds'].shape}."
             )
 
+    if "embed" in part_infos and "vlm" in part_infos:
+        _, embed_outputs = part_infos["embed"]
+        vlm_inputs, _ = part_infos["vlm"]
+        embed_output_map = _info_by_name(embed_outputs)
+        vlm_input_map = _info_by_name(vlm_inputs)
+        _require_info(embed_output_map, "inputs_embeds", "embed output")
+        _require_info(vlm_input_map, "inputs_embeds", "vlm input")
+        if embed_output_map["inputs_embeds"].shape != vlm_input_map["inputs_embeds"].shape:
+            raise ValueError(
+                "embed inputs_embeds output shape does not match vlm inputs_embeds input shape: "
+                f"{embed_output_map['inputs_embeds'].shape} != {vlm_input_map['inputs_embeds'].shape}."
+            )
+
     if "vlm" in part_infos and "llm_prefill" in part_infos:
         _, vlm_outputs = part_infos["vlm"]
         prefill_inputs, _ = part_infos["llm_prefill"]
@@ -183,17 +196,17 @@ def _verify_chain_shapes(part_infos, manifest):
                 f"{decode_output_map['hidden_states'].shape} != {gen_input_map['hidden_states'].shape}."
             )
 
-    if "embed" in part_infos and "llm_decode" in part_infos:
-        _, embed_outputs = part_infos["embed"]
+    if "embed_select" in part_infos and "llm_decode" in part_infos:
+        _, embed_select_outputs = part_infos["embed_select"]
         decode_inputs, _ = part_infos["llm_decode"]
-        embed_output_map = _info_by_name(embed_outputs)
+        embed_select_output_map = _info_by_name(embed_select_outputs)
         decode_input_map = _info_by_name(decode_inputs)
-        _require_info(embed_output_map, "inputs_embeds", "embed output")
+        _require_info(embed_select_output_map, "inputs_embeds", "embed_select output")
         _require_info(decode_input_map, "inputs_embeds", "llm_decode input")
-        if embed_output_map["inputs_embeds"].shape != decode_input_map["inputs_embeds"].shape:
+        if embed_select_output_map["inputs_embeds"].shape != decode_input_map["inputs_embeds"].shape:
             raise ValueError(
-                "embed inputs_embeds output shape does not match llm_decode inputs_embeds input shape: "
-                f"{embed_output_map['inputs_embeds'].shape} != {decode_input_map['inputs_embeds'].shape}."
+                "embed_select inputs_embeds output shape does not match llm_decode inputs_embeds input shape: "
+                f"{embed_select_output_map['inputs_embeds'].shape} != {decode_input_map['inputs_embeds'].shape}."
             )
 
     if manifest is not None and "gen" in part_infos:
@@ -210,11 +223,16 @@ def _verify_chain_shapes(part_infos, manifest):
                 raise ValueError("gen logits batch size does not match hidden_states batch size.")
             if gen_output_map["logits"].shape[1] != decode_seq_len:
                 raise ValueError("gen logits sequence length does not match decode_sequence_length.")
-            if "embed" in part_infos:
-                embed_inputs, _ = part_infos["embed"]
-                embed_input_map = _info_by_name(embed_inputs)
-                if "input_ids" in embed_input_map and embed_input_map["input_ids"].shape[1] != decode_seq_len:
-                    raise ValueError("embed input_ids sequence length does not match decode_sequence_length.")
+            if "embed_select" in part_infos:
+                embed_select_inputs, embed_select_outputs = part_infos["embed_select"]
+                embed_select_input_map = _info_by_name(embed_select_inputs)
+                embed_select_output_map = _info_by_name(embed_select_outputs)
+                _require_info(embed_select_input_map, "cache_position", "embed_select input")
+                _require_info(embed_select_output_map, "inputs_embeds", "embed_select output")
+                if embed_select_input_map["cache_position"].shape[0] != decode_seq_len:
+                    raise ValueError("embed_select cache_position length does not match decode_sequence_length.")
+                if embed_select_output_map["inputs_embeds"].shape[1] != decode_seq_len:
+                    raise ValueError("embed_select inputs_embeds sequence length does not match decode_sequence_length.")
 
     if manifest is not None and "vlm" in part_infos:
         image_embed_lengths = manifest.get("image_embed_lengths", [])
@@ -269,6 +287,7 @@ def _verify_manifest(manifest, max_sequence_length):
             f"manifest max_sequence_length {manifest_max_seq_len} != requested {max_sequence_length}."
         )
     required_notes = (
+        "vlm_inputs",
         "vlm_outputs",
         "decode_embedding",
         "external_data",
@@ -307,11 +326,18 @@ def _verify_manifest(manifest, max_sequence_length):
         if not item.get("decode_output_exists", False):
             raise ValueError(f"Manifest cache mapping has missing decode output: {item}.")
         shape = item.get("shape")
-        if shape is not None and item.get("decode_input_shape") is not None and shape != item["decode_input_shape"]:
+        decode_input_shape = item.get("decode_input_shape")
+        decode_output_shape = item.get("decode_output_shape")
+        if _has_concrete_shape(shape) and _has_concrete_shape(decode_input_shape) and shape != decode_input_shape:
             raise ValueError(f"Manifest cache input shape mismatch: {item}.")
-        if shape is not None and item.get("decode_output_shape") is not None and shape != item["decode_output_shape"]:
+        if _has_concrete_shape(shape) and _has_concrete_shape(decode_output_shape) and shape != decode_output_shape:
             raise ValueError(f"Manifest cache output shape mismatch: {item}.")
     return manifest_max_seq_len
+
+
+
+def _has_concrete_shape(shape):
+    return isinstance(shape, list) and all(isinstance(dim, int) for dim in shape)
 
 
 def _manifest_decode_sequence_length(manifest):
@@ -374,9 +400,10 @@ def _verify_runtime_inputs(manifest):
     parts = manifest.get("parts", {})
     expected_runtime_inputs = {
         "vit": ("hidden_states", "image_grid_thw"),
-        "vlm": ("input_ids", "attention_masks", "image_embeds", "mm_token_type_ids", "image_grid_thw"),
+        "vlm": ("input_ids", "inputs_embeds", "attention_masks", "image_embeds", "mm_token_type_ids", "image_grid_thw"),
         "gen": ("hidden_states",),
         "embed": ("input_ids",),
+        "embed_select": ("inputs_embeds", "cache_position"),
     }
     for part, required_inputs in expected_runtime_inputs.items():
         if part not in parts:

@@ -35,3 +35,16 @@ class Qwen35VLTokenEmbeddingOpt(nn.Module):
             **kwargs,
         ):
         return self.embed_tokens(input_ids)
+
+
+class Qwen35VLEmbedSelectOpt(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(
+            self,
+            inputs_embeds: torch.FloatTensor = None,
+            cache_position: torch.LongTensor = None,
+            **kwargs,
+        ):
+        return inputs_embeds.index_select(1, cache_position.to(inputs_embeds.device))

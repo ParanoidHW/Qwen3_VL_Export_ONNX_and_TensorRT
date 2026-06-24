@@ -29,7 +29,7 @@ class ArgsConfig:
     decode_sequence_length: int = 1
     """Static decode step length. Keep this as 1 for token-by-token decoding."""
 
-    export_parts: tuple = ("vit", "vlm", "llm_prefill", "llm_decode", "gen", "embed")
+    export_parts: tuple = ("vit", "vlm", "llm_prefill", "llm_decode", "gen", "embed", "embed_select")
     """ONNX submodules to export for the Qwen3.5-VL inference chain."""
 
     verbose_export: bool = False
