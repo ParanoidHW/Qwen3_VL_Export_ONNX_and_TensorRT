@@ -17,6 +17,8 @@ class _Qwen35OnnxCache:
         self.config = config
         self.cache_position = cache_position
         self.layers = []
+        self.conv_states = [None] * len(config.layer_types)
+        self.recurrent_states = [None] * len(config.layer_types)
         self._full_layers = {}
         self._linear_layers = {}
         self._input_cache_tensors = []
@@ -41,6 +43,8 @@ class _Qwen35OnnxCache:
                 recurrent_state = next(cache_iter)
                 self._input_cache_tensors.extend([conv_state, recurrent_state])
                 self.layers.append(_OnnxLinearCacheLayer(conv_state, recurrent_state))
+                self.conv_states[layer_idx] = conv_state
+                self.recurrent_states[layer_idx] = recurrent_state
                 self._linear_layers[layer_idx] = self.layers[-1]
             else:
                 raise ValueError(f"Unsupported Qwen3.5 layer type for ONNX cache export: {layer_type}")
@@ -70,9 +74,11 @@ class _Qwen35OnnxCache:
 
     def update_conv_state(self, new_conv_state, layer_idx):
         self._linear_layers[layer_idx].conv_states = new_conv_state
+        self.conv_states[layer_idx] = new_conv_state
 
     def update_recurrent_state(self, new_recurrent_state, layer_idx):
         self._linear_layers[layer_idx].recurrent_states = new_recurrent_state
+        self.recurrent_states[layer_idx] = new_recurrent_state
 
     def to_flat_tuple(self):
         outputs = []

@@ -8,14 +8,12 @@ class Qwen35VLVisualModelOpt(Qwen3_5VisionModel):
         super().__init__(config)
 
     def fast_pos_embed_interpolate(self, grid_thw):
-        grid_ts, grid_hs, grid_ws = grid_thw[:, 0], grid_thw[:, 1], grid_thw[:, 2]
+        grid_layout = [(int(t), int(h), int(w)) for t, h, w in grid_thw.tolist()]
 
         idx_list = [[] for _ in range(4)]
         weight_list = [[] for _ in range(4)]
 
-        for t, h, w in zip(grid_ts, grid_hs, grid_ws):
-            h_steps = int(h.item())
-            w_steps = int(w.item())
+        for _, h_steps, w_steps in grid_layout:
             h_idxs = torch.linspace(0, self.num_grid_per_side - 1, h_steps, device=self.pos_embed.weight.device)
             w_idxs = torch.linspace(0, self.num_grid_per_side - 1, w_steps, device=self.pos_embed.weight.device)
 
@@ -68,7 +66,7 @@ class Qwen35VLVisualModelOpt(Qwen3_5VisionModel):
         pos_ids = torch.empty((total_tokens, 2), dtype=torch.long, device=device)
 
         offset = 0
-        for num_frames, height, width in grid_thw:
+        for num_frames, height, width in [(int(t), int(h), int(w)) for t, h, w in grid_thw.tolist()]:
             merged_h, merged_w = height // merge_size, width // merge_size
 
             block_rows = torch.arange(merged_h, device=device)  # block row indices
@@ -134,15 +132,15 @@ def _merge_spatial_units(patch_pos_embeds, grid_thw, merge_size):
     merged = []
     offset = 0
     hidden_size = patch_pos_embeds.shape[-1]
-    for grid_t, grid_h, grid_w in grid_thw:
-        token_count = int((grid_t * grid_h * grid_w).item())
+    for grid_t, grid_h, grid_w in [(int(t), int(h), int(w)) for t, h, w in grid_thw.tolist()]:
+        token_count = grid_t * grid_h * grid_w
         image_pos_embeds = patch_pos_embeds[offset : offset + token_count]
         offset += token_count
 
-        merged_h = int((grid_h // merge_size).item())
-        merged_w = int((grid_w // merge_size).item())
+        merged_h = grid_h // merge_size
+        merged_w = grid_w // merge_size
         image_pos_embeds = image_pos_embeds.view(
-            int(grid_t.item()),
+            grid_t,
             merged_h,
             merge_size,
             merged_w,
