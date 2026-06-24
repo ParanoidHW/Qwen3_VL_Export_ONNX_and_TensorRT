@@ -5,7 +5,10 @@ from torch import nn
 class Qwen35VLForConditionalGenerationOpt(nn.Module):
     def __init__(self, config):
         super().__init__()
-        vocab_size = getattr(config.text_config, "vocab_size", config.vocab_size)
+        if hasattr(config.text_config, "vocab_size"):
+            vocab_size = config.text_config.vocab_size
+        else:
+            vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.text_config.hidden_size, vocab_size, bias=False)
 
     def forward(
